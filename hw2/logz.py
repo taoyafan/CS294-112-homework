@@ -71,7 +71,7 @@ def log_tabular(key, val):
 
 def save_params(params):
     with open(osp.join(G.output_dir, "params.json"), 'w') as out:
-        out.write(json.dumps(params, separators=(',\n','\t:\t'), sort_keys=True))
+        out.write(json.dumps(params, separators=(',\n', '\t:\t'), sort_keys=True))
 
 def pickle_tf_vars():  
     """
@@ -89,24 +89,27 @@ def dump_tabular():
     """
     vals = []
     key_lens = [len(key) for key in G.log_headers]
-    max_key_len = max(15,max(key_lens))
-    keystr = '%'+'%d'%max_key_len
+    max_key_len = max(15, max(key_lens))
+    keystr = '%'+'%d' % max_key_len
     fmt = "| " + keystr + "s | %15s |"
     n_slashes = 22 + max_key_len
     print("-"*n_slashes)
     for key in G.log_headers:
         val = G.log_current_row.get(key, "")
-        if hasattr(val, "__float__"): valstr = "%8.3g"%val
-        else: valstr = val
-        print(fmt%(key, valstr))
+        if hasattr(val, "__float__"):
+            valstr = "%8.3g"%val
+        else:
+            valstr = val
+            
+        print(fmt % (key, valstr))
         vals.append(val)
     print("-"*n_slashes)
     if G.output_file is not None:
         if G.first_row:
             G.output_file.write("\t".join(G.log_headers))
             G.output_file.write("\n")
-        G.output_file.write("\t".join(map(str,vals)))
+        G.output_file.write("\t".join(map(str, vals)))
         G.output_file.write("\n")
         G.output_file.flush()
     G.log_current_row.clear()
-    G.first_row=False
+    G.first_row = False

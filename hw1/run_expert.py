@@ -3,7 +3,7 @@
 """
 Code to load an expert policy and generate roll-out data for behavioral cloning.
 Example usage:
-    python run_expert.py experts/Humanoid-v1.pkl Humanoid-v1 --render \
+    python run_expert.py experts/Humanoid-v2.pkl Humanoid-v2 --render \
             --num_rollouts 20
 
 Author of this script and included expert policies: Jonathan Ho (hoj@openai.com)
@@ -49,7 +49,7 @@ def main():
             totalr = 0.
             steps = 0
             while not done:
-                action = policy_fn(obs[None,:])
+                action = policy_fn(obs[None, :])
                 observations.append(obs)
                 actions.append(action)
                 obs, r, done, _ = env.step(action)
@@ -69,8 +69,11 @@ def main():
         expert_data = {'observations': np.array(observations),
                        'actions': np.array(actions)}
 
-        with open(os.path.join('expert_data', args.envname + '.pkl'), 'wb') as f:
+        save_dir = os.path.join('expert_data', args.envname + '.pkl')
+        if not os.path.exists('expert_data'): os.makedirs('expert_data')
+        with open(save_dir, 'wb') as f:
             pickle.dump(expert_data, f, pickle.HIGHEST_PROTOCOL)
+
 
 if __name__ == '__main__':
     main()
