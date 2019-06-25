@@ -142,8 +142,17 @@ class ModelBasedPolicy(object):
         """
         ### PROBLEM 2
         ### YOUR CODE HERE
-        raise NotImplementedError
-
+        pre_state = tf.stack([state_ph[0]] * self._num_random_action_selection, axis=0)
+        cost = tf.zeros(self._num_random_action_selection, tf.float32)
+        action = tf.random_uniform([self._num_random_action_selection, self._horizon, self._action_dim],
+                                                      self._action_space_low,
+                                                      self._action_space_high)
+        for i in range(self._horizon):
+            state = self._dynamics_func(pre_state, action[:, i, :], reuse=True)
+            cost += self._cost_fn(pre_state, action, state)
+            pre_state = state
+            
+        best_action = action[tf.argmin(cost, axis=0), :, :][0]
         return best_action
 
     def _setup_graph(self):
@@ -164,7 +173,7 @@ class ModelBasedPolicy(object):
         
         ### PROBLEM 2
         ### YOUR CODE HERE
-        best_action = None
+        best_action = self._setup_action_selection(state_ph)
 
         sess.run(tf.global_variables_initializer())
 
@@ -220,7 +229,7 @@ class ModelBasedPolicy(object):
 
         ### PROBLEM 2
         ### YOUR CODE HERE
-        raise NotImplementedError
+        best_action = self._sess.run(self._best_action, {self._state_ph: [state]})
 
         assert np.shape(best_action) == (self._action_dim,)
         return best_action
