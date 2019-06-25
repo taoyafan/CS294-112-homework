@@ -164,10 +164,10 @@ class Agent(object):
                     n_layers=self.n_layers,
                     size=self.size)
             
-            initial = tf.constant(2, shape=[self.ac_dim], dtype=tf.float32)
-            sy_logstd = tf.Variable(initial, dtype=tf.float32, expected_shape=self.ac_dim, name='log_std')
-            # sy_logstd = tf.get_variable('sy_logstd', [self.ac_dim])
-            sy_logstd = tf.abs(sy_logstd)
+            # initial = tf.constant(2, shape=[self.ac_dim], dtype=tf.float32)
+            # sy_logstd = tf.Variable(initial, dtype=tf.float32, expected_shape=self.ac_dim, name='log_std')
+            sy_logstd = tf.get_variable('sy_logstd', [self.ac_dim])
+            # sy_logstd = tf.abs(sy_logstd)
             return (sy_mean, sy_logstd)
 
     #========================================================================================#
@@ -204,7 +204,7 @@ class Agent(object):
         else:
             sy_mean, sy_logstd = policy_parameters
             # YOUR_CODE_HERE
-            sy_sampled_ac = sy_mean + sy_logstd * tf.random_normal(shape=[tf.shape(sy_mean)[0], self.ac_dim])
+            sy_sampled_ac = sy_mean + tf.exp(sy_logstd) * tf.random_normal(tf.shape(sy_mean))
         return sy_sampled_ac
 
     #========================================================================================#
@@ -243,8 +243,8 @@ class Agent(object):
         else:
             sy_mean, sy_logstd = policy_parameters
             # YOUR_CODE_HERE
-            sy_logprob_n = tf.log(tf.reduce_sum(1/(np.sqrt(2*np.pi) * sy_logstd))) \
-                + tf.reduce_sum(- tf.pow(sy_ac_na - sy_mean, 2) / (2*tf.pow(sy_logstd, 2)), axis=1)
+            sy = (sy_ac_na - sy_mean) / tf.exp(sy_logstd)
+            sy_logprob_n = - 0.5 * tf.reduce_sum(sy * sy, axis=1)
         return sy_logprob_n
 
     def build_computation_graph(self):
