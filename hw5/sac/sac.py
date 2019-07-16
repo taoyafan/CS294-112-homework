@@ -32,6 +32,8 @@ class SAC:
         self._learning_rate = learning_rate
         self._reparameterize = reparameterize
         self._tau = tau
+        self._training_loss = []
+        self._loss = []
 
         self._training_ops = []
 
@@ -47,7 +49,7 @@ class SAC:
                                                     target_value_function)
         if q_function2 is not None:
             q_function2_loss = self._q_function_loss_for(q_function2,
-                                                        target_value_function)
+                                                         target_value_function)
 
         optimizer = tf.train.AdamOptimizer(
             self._learning_rate, name='optimizer')
@@ -61,7 +63,9 @@ class SAC:
         if q_function2 is not None:
             q_function2_training_op = optimizer.minimize(
                 loss=q_function2_loss, var_list=q_function2.trainable_variables)
-
+        
+        self._training_loss = [policy_loss, value_function_loss, q_function_loss]
+        
         self._training_ops = [
             policy_training_op, value_training_op, q_function_training_op
         ]
@@ -103,24 +107,53 @@ class SAC:
         )
 
     def _policy_loss_for(self, policy, q_function, q_function2, value_function):
+        if q_function2 is None:
+            q_function2 = q_function
+        
         if not self._reparameterize:
             ### Problem 1.3.A
             ### YOUR CODE HERE
-            raise NotImplementedError
+            action, log_pis = policy(self._observations_ph)
+            loss = log_pis * tf.stop_gradient(self._alpha * log_pis
+                                              - tf.squeeze(tf.minimum(q_function([self._observations_ph, action]),
+                                                                      q_function2([self._observations_ph, action])))
+                                              + tf.squeeze(value_function(self._observations_ph)))
         else:
             ### Problem 1.3.B
             ### YOUR CODE HERE
-            raise NotImplementedError
+            action, log_pis = policy(self._observations_ph)
+            loss = self._alpha * log_pis - tf.squeeze(tf.minimum(q_function([self._observations_ph, action]),
+                                                                 q_function2([self._observations_ph, action])))
+        
+        return tf.reduce_mean(loss)
 
     def _value_function_loss_for(self, policy, q_function, q_function2, value_function):
         ### Problem 1.2.A
         ### YOUR CODE HERE
-        raise NotImplementedError
+        if q_function2 is None:
+            q_function2 = q_function
+
+        action, log_pis = policy(self._observations_ph)
+        loss = (tf.squeeze(value_function(self._observations_ph))
+                - (tf.squeeze(tf.minimum(q_function([self._observations_ph, action]),
+                                         q_function2([self._observations_ph, action]))
+                              )
+                   - self._alpha * log_pis
+                   )
+                ) ** 2
+        
+        return tf.reduce_mean(loss)
 
     def _q_function_loss_for(self, q_function, target_value_function):
         ### Problem 1.1.A
         ### YOUR CODE HERE
-        raise NotImplementedError
+        loss = (tf.squeeze(q_function([self._observations_ph, self._actions_ph]))
+                - (self._rewards_ph + (1 - self._terminals_ph)
+                   * self._discount
+                   * tf.squeeze(target_value_function(self._next_observations_ph)))
+                ) ** 2
+        
+        return tf.reduce_mean(loss)
 
     def _create_target_update(self, source, target):
         """Create tensorflow operations for updating target value function."""
@@ -154,7 +187,7 @@ class SAC:
                     self._rewards_ph: batch['rewards'],
                     self._terminals_ph: batch['terminals'],
                 }
-                tf.get_default_session().run(self._training_ops, feed_dict)
+                self._loss, _ = tf.get_default_session().run([self._training_loss, self._training_ops], feed_dict)
                 tf.get_default_session().run(self._target_update_ops)
 
             yield epoch
@@ -163,6 +196,9 @@ class SAC:
         statistics = {
             'Time': time.time() - self._start,
             'TimestepsThisBatch': self._epoch_length,
+            # 'Policy loss': self._loss[0],
+            # 'Value loss': self._loss[1],
+            # 'Q loss': self._loss[2]
         }
 
         return statistics

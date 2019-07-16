@@ -11,6 +11,9 @@ from sac import SAC
 import utils
 
 from multiprocessing import Process
+import warnings
+warnings.filterwarnings("ignore")
+
 
 def train_SAC(env_name, exp_name, seed, logdir):
     alpha = {
@@ -26,11 +29,11 @@ def train_SAC(env_name, exp_name, seed, logdir):
         'batch_size': 256,
         'discount': 0.99,
         'learning_rate': 1e-3,
-        'reparameterize': False,
+        'reparameterize': True,
         'tau': 0.01,
         'epoch_length': 1000,
         'n_epochs': 500,
-        'two_qf': False,
+        'two_qf': True,
     }
     sampler_params = {
         'max_episode_length': 1000,
@@ -116,6 +119,7 @@ def train_SAC(env_name, exp_name, seed, logdir):
                 logz.log_tabular(k, v)
             logz.dump_tabular()
 
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--env_name', type=str, default='HalfCheetah-v2')
@@ -155,6 +159,7 @@ def main():
 
     for p in processes:
         p.join()
+
 
 if __name__ == '__main__':
     main()
