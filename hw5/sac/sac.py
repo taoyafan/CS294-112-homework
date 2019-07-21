@@ -1,5 +1,8 @@
 import tensorflow as tf
 import time
+import utils
+
+DEBUG = True
 
 class SAC:
     """Soft Actor-Critic (SAC)
@@ -13,6 +16,7 @@ class SAC:
     """
 
     def __init__(self,
+                 pool,
                  alpha=1.0,
                  batch_size=256,
                  discount=0.99,
@@ -20,10 +24,14 @@ class SAC:
                  learning_rate=3e-3,
                  reparameterize=False,
                  tau=0.01,
+                 use_model=False,
+                 horizon=15,
+                 num_action_selection=5,
                  **kwargs):
         """
         Args:
         """
+        self._pool = pool
 
         self._alpha = alpha
         self._batch_size = batch_size
@@ -32,17 +40,29 @@ class SAC:
         self._learning_rate = learning_rate
         self._reparameterize = reparameterize
         self._tau = tau
-        self._training_loss = []
-        self._loss = []
-
+        self._use_model = use_model
+        self._horizon = horizon
+        self._num_action_selection = num_action_selection
+        
+        self._training_loss = {}
+        self._loss_show = {}
         self._training_ops = []
+        self._target_update_ops = None
+        self._debug_val = {}
+        self._debug_val_show = {}
 
+    def add_debug(self, name, x):
+        if DEBUG:
+            self._debug_val[name] = tf.identity(x, name=name+'_debug')
+    
+    def _add_loss(self, name, x):
+        self._training_loss[name] = tf.identity(x, name=name)
+        
     def build(self, env, policy, q_function, q_function2, value_function,
-              target_value_function):
-
+              target_value_function, model_function):
+        
         self._create_placeholders(env)
 
-        policy_loss = self._policy_loss_for(policy, q_function, q_function2, value_function)
         value_function_loss = self._value_function_loss_for(
             policy, q_function, q_function2, value_function)
         q_function_loss = self._q_function_loss_for(q_function,
@@ -50,7 +70,11 @@ class SAC:
         if q_function2 is not None:
             q_function2_loss = self._q_function_loss_for(q_function2,
                                                          target_value_function)
-
+        if self._use_model:
+            obs_pre_loss, rewards_pre_loss = self._model_loss_for(model_function)
+            
+        policy_loss = self._policy_loss_for(policy, q_function, q_function2, value_function, model_function)
+        
         optimizer = tf.train.AdamOptimizer(
             self._learning_rate, name='optimizer')
         policy_training_op = optimizer.minimize(
@@ -60,17 +84,32 @@ class SAC:
             var_list=value_function.trainable_variables)
         q_function_training_op = optimizer.minimize(
             loss=q_function_loss, var_list=q_function.trainable_variables)
-        if q_function2 is not None:
-            q_function2_training_op = optimizer.minimize(
-                loss=q_function2_loss, var_list=q_function2.trainable_variables)
         
-        self._training_loss = [policy_loss, value_function_loss, q_function_loss]
-        
+
         self._training_ops = [
             policy_training_op, value_training_op, q_function_training_op
         ]
+        
+        self._add_loss('policy_loss', policy_loss)
+        self._add_loss('value_function_loss', value_function_loss)
+        self._add_loss('q_function_loss', q_function_loss)
+
+        if self._use_model:
+            obs_prd_training_op = optimizer.minimize(
+                loss=obs_pre_loss, var_list=model_function.trainable_variables)
+            rewards_ped_training_op = optimizer.minimize(
+                loss=rewards_pre_loss, var_list=model_function.trainable_variables)
+            
+            self._training_ops += [obs_prd_training_op, rewards_ped_training_op]
+            self._add_loss('obs_pre_loss', obs_pre_loss)
+            self._add_loss('rewards_pre_loss', rewards_pre_loss)
+            
         if q_function2 is not None:
+            q_function2_training_op = optimizer.minimize(
+                loss=q_function2_loss, var_list=q_function2.trainable_variables)
             self._training_ops += [q_function2_training_op]
+            self._add_loss('q_function2_loss', q_function2_loss)
+        
         self._target_update_ops = self._create_target_update(
             source=value_function, target=target_value_function)
 
@@ -106,24 +145,94 @@ class SAC:
             name='terminals',
         )
 
-    def _policy_loss_for(self, policy, q_function, q_function2, value_function):
+    def _model_predict(self, model_function, observations, actions):
+        observations_norm = utils.normalize(observations, self._pool.observations_mean, self._pool.observations_std)
+        actions_norm = utils.normalize(actions, self._pool.actions_mean, self._pool.actions_std)
+        
+        delta_norm, rewards = model_function([observations_norm, actions_norm])
+        
+        delta = utils.unnormalize(delta_norm, self._pool.delta_observations_mean, self._pool.delta_observations_std)
+        next_observations = observations + delta
+        
+        return next_observations, tf.squeeze(rewards)
+
+    def _model_loss_for(self, model_function):
+        next_obs_pred, reward_pre = self._model_predict(model_function, self._observations_ph, self._actions_ph)
+        obs_diff = self._next_observations_ph - self._observations_ph
+        obs_pred_diff = next_obs_pred - self._observations_ph
+        obs_diff_norm = utils.normalize(obs_diff,
+                                        self._pool.delta_observations_mean,
+                                        self._pool.delta_observations_std)
+        obs_pred_diff_norm = utils.normalize(obs_pred_diff,
+                                             self._pool.delta_observations_mean,
+                                             self._pool.delta_observations_std)
+        
+        obs_pre_loss = tf.losses.mean_squared_error(obs_diff_norm, obs_pred_diff_norm)
+        reward_pre_loss = tf.losses.mean_squared_error(self._rewards_ph, reward_pre)
+        
+        return obs_pre_loss, reward_pre_loss
+
+    def _setup_action_selection(self, model_function, policy, value_function):
+        if model_function is None:
+            return tf.random_uniform([self._batch_size, 1], -1, 1)
+        else:
+            observations = tf.tile(self._observations_ph, [self._num_action_selection, 1])
+        
+            # shape: [batch_size * num_action_selection, 1]
+            rewards = tf.zeros(self._num_action_selection * self._batch_size, dtype=tf.float32)
+        
+            actions, log_pis = policy(observations)
+            temp_log_pis = tf.identity(log_pis, name='temp_log_pis')
+        
+            for i in range(self._horizon):
+                observations, temp_rewards = self._model_predict(model_function, observations, actions)
+                rewards += tf.pow(self._discount, i) * (tf.squeeze(temp_rewards) - self._alpha * temp_log_pis)
+                actions, temp_log_pis = policy(observations)
+        
+            rewards += tf.pow(self._discount, self._horizon) * tf.squeeze(value_function(observations))
+            # rewards = tf.squeeze(rewards)
+        
+            # list of tensor [num_action_selection]. length = batch size
+            rewards_list = [tf.gather(rewards, tf.range(self._num_action_selection) * self._batch_size + i)
+                            for i in range(self._batch_size)]
+        
+            # list of tensor [num_action_selection]. length = batch size
+            log_pis_list = [tf.gather(log_pis, tf.range(self._num_action_selection) * self._batch_size + i, axis=0)
+                            for i in range(self._batch_size)]
+        
+            # list of tf.float32 with length = batch size
+            best_action_indices = [tf.argmax(r) for r in rewards_list]
+        
+            # list of tf.float32 with length = batch size
+            best_action_log_pis = [tf.gather(log_pis_list[i], best_action_indices[i], axis=0)
+                                   for i in range(self._batch_size)]
+        
+            return tf.stack(best_action_log_pis, axis=0)  # shape = [batch size, 1]
+
+    def _policy_loss_for(self, policy, q_function, q_function2, value_function, model_function):
         if q_function2 is None:
             q_function2 = q_function
         
-        if not self._reparameterize:
-            ### Problem 1.3.A
-            ### YOUR CODE HERE
-            action, log_pis = policy(self._observations_ph)
-            loss = log_pis * tf.stop_gradient(self._alpha * log_pis
-                                              - tf.squeeze(tf.minimum(q_function([self._observations_ph, action]),
-                                                                      q_function2([self._observations_ph, action])))
-                                              + tf.squeeze(value_function(self._observations_ph)))
+        if model_function is not None:
+            target_log_pis = self._setup_action_selection(model_function, policy, value_function)
+            self.add_debug('target_log_pis', target_log_pis)
+            loss = -target_log_pis
         else:
-            ### Problem 1.3.B
-            ### YOUR CODE HERE
-            action, log_pis = policy(self._observations_ph)
-            loss = self._alpha * log_pis - tf.squeeze(tf.minimum(q_function([self._observations_ph, action]),
-                                                                 q_function2([self._observations_ph, action])))
+            if not self._reparameterize:
+                ### Problem 1.3.A
+                ### YOUR CODE HERE
+                action, log_pis = policy(self._observations_ph)
+                loss = log_pis * tf.stop_gradient(self._alpha * log_pis
+                                                  - tf.squeeze(tf.minimum(q_function([self._observations_ph, action]),
+                                                                          q_function2([self._observations_ph, action])))
+                                                  + tf.squeeze(value_function(self._observations_ph)))
+            else:
+                ### Problem 1.3.B
+                ### YOUR CODE HERE
+                action, log_pis = policy(self._observations_ph)
+                self.add_debug('log_pis', log_pis)
+                loss = self._alpha * log_pis - tf.squeeze(tf.minimum(q_function([self._observations_ph, action]),
+                                                                     q_function2([self._observations_ph, action])))
         
         return tf.reduce_mean(loss)
 
@@ -134,14 +243,15 @@ class SAC:
             q_function2 = q_function
 
         action, log_pis = policy(self._observations_ph)
-        loss = (tf.squeeze(value_function(self._observations_ph))
-                - (tf.squeeze(tf.minimum(q_function([self._observations_ph, action]),
-                                         q_function2([self._observations_ph, action]))
-                              )
-                   - self._alpha * log_pis
-                   )
-                ) ** 2
+        target_value = (tf.squeeze(tf.minimum(q_function([self._observations_ph, action]),
+                                              q_function2([self._observations_ph, action])))
+                        - self._alpha * log_pis)
+        loss = (tf.squeeze(value_function(self._observations_ph)) - target_value) ** 2
         
+        self.add_debug('target_value', target_value)
+        self.add_debug('value', tf.squeeze(value_function(self._observations_ph)))
+        self.add_debug('value_loss', tf.reduce_mean(loss))
+
         return tf.reduce_mean(loss)
 
     def _q_function_loss_for(self, q_function, target_value_function):
@@ -187,18 +297,28 @@ class SAC:
                     self._rewards_ph: batch['rewards'],
                     self._terminals_ph: batch['terminals'],
                 }
-                self._loss, _ = tf.get_default_session().run([self._training_loss, self._training_ops], feed_dict)
+                self._debug_val_show, self._loss_show, _ = tf.get_default_session().run(
+                    [self._debug_val, self._training_loss, self._training_ops], feed_dict)
                 tf.get_default_session().run(self._target_update_ops)
-
+            
+                # For debug
+                if DEBUG:
+                    print('epoch: {}, t: {}\n'.format(epoch, t))
+                    for name, val in self._debug_val_show.items():
+                        print('{} is {}\n'.format(name, val))
+                    print('-'*15 + '\n')
+                    
+            
             yield epoch
 
     def get_statistics(self):
         statistics = {
             'Time': time.time() - self._start,
             'TimestepsThisBatch': self._epoch_length,
-            # 'Policy loss': self._loss[0],
-            # 'Value loss': self._loss[1],
-            # 'Q loss': self._loss[2]
         }
+        
+        for name, val in self._loss_show.items():
+            statistics[name] = val
+            
 
         return statistics

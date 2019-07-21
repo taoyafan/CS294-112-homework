@@ -15,7 +15,7 @@ import warnings
 warnings.filterwarnings("ignore")
 
 
-def train_SAC(env_name, exp_name, seed, logdir):
+def train_SAC(env_name, exp_name, seed, logdir, use_model=False):
     alpha = {
         'Ant-v2': 0.1,
         'HalfCheetah-v2': 0.2,
@@ -26,7 +26,7 @@ def train_SAC(env_name, exp_name, seed, logdir):
 
     algorithm_params = {
         'alpha': alpha,
-        'batch_size': 256,
+        'batch_size': 2,
         'discount': 0.99,
         'learning_rate': 1e-3,
         'reparameterize': True,
@@ -34,6 +34,9 @@ def train_SAC(env_name, exp_name, seed, logdir):
         'epoch_length': 1000,
         'n_epochs': 500,
         'two_qf': True,
+        'use_model': use_model,
+        'horizon': 3,
+        'num_action_selection': 4
     }
     sampler_params = {
         'max_episode_length': 1000,
@@ -44,6 +47,10 @@ def train_SAC(env_name, exp_name, seed, logdir):
     }
 
     value_function_params = {
+        'hidden_layer_sizes': (128, 128),
+    }
+
+    model_function_params = {
         'hidden_layer_sizes': (128, 128),
     }
 
@@ -80,6 +87,7 @@ def train_SAC(env_name, exp_name, seed, logdir):
         action_shape=env.action_space.shape,
         **replay_pool_params)
 
+    # Define functions
     q_function = nn.QFunction(name='q_function', **q_function_params)
     if algorithm_params.get('two_qf', False):
         q_function2 = nn.QFunction(name='q_function2', **q_function_params)
@@ -93,10 +101,18 @@ def train_SAC(env_name, exp_name, seed, logdir):
         action_dim=env.action_space.shape[0],
         reparameterize=algorithm_params['reparameterize'],
         **policy_params)
-
+    if use_model:
+        model_function = nn.ModelFunction(
+            name='model_function',
+            observations_dim=env.observation_space.shape[0],
+            **model_function_params
+        )
+    else:
+        model_function = None
+    
     sampler.initialize(env, policy, replay_pool)
 
-    algorithm = SAC(**algorithm_params)
+    algorithm = SAC(pool=sampler.pool, **algorithm_params)
 
     tf_config = tf.ConfigProto(inter_op_parallelism_threads=1, intra_op_parallelism_threads=1)
     tf_config.gpu_options.allow_growth = True  # may need if using GPU
@@ -107,7 +123,9 @@ def train_SAC(env_name, exp_name, seed, logdir):
             q_function=q_function,
             q_function2=q_function2,
             value_function=value_function,
-            target_value_function=target_value_function)
+            target_value_function=target_value_function,
+            model_function=model_function,
+        )
 
         for epoch in algorithm.train(sampler, n_epochs=algorithm_params.get('n_epochs', 1000)):
             logz.log_tabular('Iteration', epoch)
@@ -126,6 +144,7 @@ def main():
     parser.add_argument('--exp_name', type=str, default=None)
     parser.add_argument('--seed', type=int, default=1)
     parser.add_argument('--n_experiments', '-e', type=int, default=1)
+    parser.add_argument('--use_model', action='store_true')
     args = parser.parse_args()
 
     data_path = os.path.join(os.path.dirname(os.path.realpath(__file__)), 'data')
@@ -147,6 +166,7 @@ def main():
                 exp_name=args.exp_name,
                 seed=seed,
                 logdir=os.path.join(logdir, '%d' % seed),
+                use_model=args.use_model
             )
         # # Awkward hacky process runs, because Tensorflow does not like
         # # repeatedly calling train_AC in the same thread.

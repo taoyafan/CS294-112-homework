@@ -2,6 +2,26 @@ import numpy as np
 import os
 import tensorflow as tf
 
+def normalize(x, mean, std, eps=1e-8):
+    return (x - mean) / (std + eps)
+
+def unnormalize(x, mean, std):
+    return x * std + mean
+
+def build_mlp(input_layer,
+              output_dim,
+              scope,
+              n_layers=1,
+              hidden_dim=500,
+              activation=tf.nn.relu,
+              output_activation=None,
+              reuse=False):
+    layer = input_layer
+    with tf.variable_scope(scope, reuse=reuse):
+        for _ in range(n_layers):
+            layer = tf.layers.dense(layer, hidden_dim, activation=activation)
+        layer = tf.layers.dense(layer, output_dim, activation=output_activation)
+    return layer
 
 class Logger:
     def __init__(self, log_dir):
@@ -94,7 +114,20 @@ class ReplayPool:
         return {
             'PoolSize': self._size,
         }
+    
+    def get_mean(self, field_name):
+        return np.mean(getattr(self, field_name)[0: self._size], axis=0)
 
+    def get_std(self, field_name):
+        return np.std(getattr(self, field_name)[0: self._size], axis=0)
+    
+    def get_delta_mean(self, field_name_1, field_name_2):
+        return np.mean(getattr(self, field_name_1)[0: self._size]
+                       - getattr(self, field_name_2)[0: self._size], axis=0)
+    
+    def get_delta_std(self, field_name_1, field_name_2):
+        return np.std(getattr(self, field_name_1)[0: self._size]
+                       - getattr(self, field_name_2)[0: self._size], axis=0)
 
 class SimpleReplayPool(ReplayPool):
     def __init__(self, observation_shape, action_shape, *args, **kwargs):
@@ -129,6 +162,30 @@ class SimpleReplayPool(ReplayPool):
         }
 
         super(SimpleReplayPool, self).__init__(*args, fields=fields, **kwargs)
+
+    @property
+    def observations_mean(self):
+        return self.get_mean('observations')
+
+    @property
+    def observations_std(self):
+        return self.get_std('observations')
+
+    @property
+    def actions_mean(self):
+        return self.get_mean('actions')
+
+    @property
+    def actions_std(self):
+        return self.get_std('actions')
+
+    @property
+    def delta_observations_mean(self):
+        return self.get_delta_mean('next_observations', 'observations')
+
+    @property
+    def delta_observations_std(self):
+        return self.get_delta_std('next_observations', 'observations')
 
 
 class Sampler(object):
@@ -221,3 +278,4 @@ class SimpleSampler(Sampler):
         }
 
         return statistics
+
