@@ -1,8 +1,11 @@
 import tensorflow as tf
 import time
 import utils
+import numpy as np
 
-DEBUG = True
+
+DEBUG = False
+
 
 class SAC:
     """Soft Actor-Critic (SAC)
@@ -43,6 +46,7 @@ class SAC:
         self._use_model = use_model
         self._horizon = horizon
         self._num_action_selection = num_action_selection
+        self._best_actions = None
         
         self._training_loss = {}
         self._loss_show = {}
@@ -62,7 +66,7 @@ class SAC:
               target_value_function, model_function):
         
         self._create_placeholders(env)
-
+        
         value_function_loss = self._value_function_loss_for(
             policy, q_function, q_function2, value_function)
         q_function_loss = self._q_function_loss_for(q_function,
@@ -94,7 +98,10 @@ class SAC:
         self._add_loss('value_function_loss', value_function_loss)
         self._add_loss('q_function_loss', q_function_loss)
 
+
         if self._use_model:
+            _, _, self._best_actions = self._setup_action_selection(model_function, policy, target_value_function)
+            
             obs_prd_training_op = optimizer.minimize(
                 loss=obs_pre_loss, var_list=model_function.trainable_variables)
             rewards_ped_training_op = optimizer.minimize(
@@ -173,15 +180,18 @@ class SAC:
         return obs_pre_loss, reward_pre_loss
 
     def _setup_action_selection(self, model_function, policy, value_function):
+        batch_size = 1
         if model_function is None:
-            return tf.random_uniform([self._batch_size, 1], -1, 1)
+            return tf.random_uniform([batch_size, 1], -1, 1)
         else:
             observations = tf.tile(self._observations_ph, [self._num_action_selection, 1])
         
             # shape: [batch_size * num_action_selection, 1]
-            rewards = tf.zeros(self._num_action_selection * self._batch_size, dtype=tf.float32)
+            rewards = tf.zeros(self._num_action_selection * batch_size, dtype=tf.float32)
         
             actions, log_pis = policy(observations)
+            action_list = [tf.gather(actions, tf.range(self._num_action_selection) * batch_size + i, axis=0)
+                           for i in range(self._batch_size)]
             temp_log_pis = tf.identity(log_pis, name='temp_log_pis')
         
             for i in range(self._horizon):
@@ -193,46 +203,51 @@ class SAC:
             # rewards = tf.squeeze(rewards)
         
             # list of tensor [num_action_selection]. length = batch size
-            rewards_list = [tf.gather(rewards, tf.range(self._num_action_selection) * self._batch_size + i)
-                            for i in range(self._batch_size)]
+            rewards_list = [tf.gather(rewards, tf.range(self._num_action_selection) * batch_size + i)
+                            for i in range(batch_size)]
         
             # list of tensor [num_action_selection]. length = batch size
-            log_pis_list = [tf.gather(log_pis, tf.range(self._num_action_selection) * self._batch_size + i, axis=0)
-                            for i in range(self._batch_size)]
+            log_pis_list = [tf.gather(log_pis, tf.range(self._num_action_selection) * batch_size + i, axis=0)
+                            for i in range(batch_size)]
         
             # list of tf.float32 with length = batch size
             best_action_indices = [tf.argmax(r) for r in rewards_list]
         
             # list of tf.float32 with length = batch size
             best_action_log_pis = [tf.gather(log_pis_list[i], best_action_indices[i], axis=0)
-                                   for i in range(self._batch_size)]
-        
-            return tf.stack(best_action_log_pis, axis=0)  # shape = [batch size, 1]
+                                   for i in range(batch_size)]
+
+            max_reward_list = [tf.gather(rewards_list[i], best_action_indices[i], axis=0)
+                               for i in range(batch_size)]
+            best_action_list = [tf.gather(action_list[i], best_action_indices[i], axis=0)
+                                for i in range(batch_size)]
+            
+            self.add_debug('best_action', tf.stack(best_action_list, axis=0))
+
+            # shape = [batch size, 1], action shape is [batch size, action_dim]
+            return tf.stack(best_action_log_pis, axis=0),\
+                   tf.stack(max_reward_list, axis=0), \
+                   tf.stack(best_action_list, axis=0)
 
     def _policy_loss_for(self, policy, q_function, q_function2, value_function, model_function):
         if q_function2 is None:
             q_function2 = q_function
         
-        if model_function is not None:
-            target_log_pis = self._setup_action_selection(model_function, policy, value_function)
-            self.add_debug('target_log_pis', target_log_pis)
-            loss = -target_log_pis
+        if not self._reparameterize:
+            ### Problem 1.3.A
+            ### YOUR CODE HERE
+            action, log_pis = policy(self._observations_ph)
+            loss = log_pis * tf.stop_gradient(self._alpha * log_pis
+                                              - tf.squeeze(tf.minimum(q_function([self._observations_ph, action]),
+                                                                      q_function2([self._observations_ph, action])))
+                                              + tf.squeeze(value_function(self._observations_ph)))
         else:
-            if not self._reparameterize:
-                ### Problem 1.3.A
-                ### YOUR CODE HERE
-                action, log_pis = policy(self._observations_ph)
-                loss = log_pis * tf.stop_gradient(self._alpha * log_pis
-                                                  - tf.squeeze(tf.minimum(q_function([self._observations_ph, action]),
-                                                                          q_function2([self._observations_ph, action])))
-                                                  + tf.squeeze(value_function(self._observations_ph)))
-            else:
-                ### Problem 1.3.B
-                ### YOUR CODE HERE
-                action, log_pis = policy(self._observations_ph)
-                self.add_debug('log_pis', log_pis)
-                loss = self._alpha * log_pis - tf.squeeze(tf.minimum(q_function([self._observations_ph, action]),
-                                                                     q_function2([self._observations_ph, action])))
+            ### Problem 1.3.B
+            ### YOUR CODE HERE
+            action, log_pis = policy(self._observations_ph)
+            self.add_debug('log_pis', log_pis)
+            loss = self._alpha * log_pis - tf.squeeze(tf.minimum(q_function([self._observations_ph, action]),
+                                                                 q_function2([self._observations_ph, action])))
         
         return tf.reduce_mean(loss)
 
@@ -248,9 +263,9 @@ class SAC:
                         - self._alpha * log_pis)
         loss = (tf.squeeze(value_function(self._observations_ph)) - target_value) ** 2
         
-        self.add_debug('target_value', target_value)
-        self.add_debug('value', tf.squeeze(value_function(self._observations_ph)))
-        self.add_debug('value_loss', tf.reduce_mean(loss))
+        # self.add_debug('target_value', target_value)
+        # self.add_debug('value', tf.squeeze(value_function(self._observations_ph)))
+        # self.add_debug('value_loss', tf.reduce_mean(loss))
 
         return tf.reduce_mean(loss)
 
@@ -273,6 +288,14 @@ class SAC:
             for target, source in zip(target.trainable_variables, source.
                                       trainable_variables)
         ]
+    
+    def get_actions_using_model(self, observations):
+        if np.ndim(observations) == 1:
+            observations = [observations]
+            
+        feed_dict = {self._observations_ph: observations}
+        best_actions = tf.get_default_session().run(self._best_actions, feed_dict)
+        return best_actions
 
     def train(self, sampler, n_epochs=1000):
         """Return a generator that performs RL training.
@@ -287,8 +310,8 @@ class SAC:
         self._start = time.time()
         for epoch in range(n_epochs):
             for t in range(self._epoch_length):
-                sampler.sample()
-
+                sampler.sample(policy=self.get_actions_using_model)
+    
                 batch = sampler.random_batch(self._batch_size)
                 feed_dict = {
                     self._observations_ph: batch['observations'],
@@ -306,8 +329,7 @@ class SAC:
                     print('epoch: {}, t: {}\n'.format(epoch, t))
                     for name, val in self._debug_val_show.items():
                         print('{} is {}\n'.format(name, val))
-                    print('-'*15 + '\n')
-                    
+                    print('-'*50 + '\n')
             
             yield epoch
 

@@ -72,7 +72,7 @@ class ModelFunction(Network):
 
         next_observation, reward = self._f([observation[None]])
         return next_observation.flatten(), reward.flatten()
-        
+    
 
 class GaussianPolicy(Network):
     def __init__(self, action_dim, hidden_layer_sizes, reparameterize, **kwargs):

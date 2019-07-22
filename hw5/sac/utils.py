@@ -211,7 +211,7 @@ class Sampler(object):
 
         uniform_exploration_policy = UniformPolicy(env.action_space.shape[0])
         for _ in range(self._prefill_steps):
-            self.sample(uniform_exploration_policy)
+            self.sample(uniform_exploration_policy.eval)
 
     def set_policy(self, policy):
         self.policy = policy
@@ -239,11 +239,11 @@ class SimpleSampler(Sampler):
         self._total_samples = 0
 
     def sample(self, policy=None):
-        policy = self.policy if policy is None else policy
+        policy = self.policy.eval if policy is None else policy
         if self._current_observation is None:
             self._current_observation = self.env.reset()
 
-        action = policy.eval(self._current_observation)
+        action = policy(self._current_observation)
         next_observation, reward, terminal, info = self.env.step(action)
         self._episode_length += 1
         self._episode_return += reward
