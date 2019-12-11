@@ -89,7 +89,6 @@ class SAC:
         q_function_training_op = optimizer.minimize(
             loss=q_function_loss, var_list=q_function.trainable_variables)
         
-
         self._training_ops = [
             policy_training_op, value_training_op, q_function_training_op
         ]
@@ -97,7 +96,6 @@ class SAC:
         self._add_loss('policy_loss', policy_loss)
         self._add_loss('value_function_loss', value_function_loss)
         self._add_loss('q_function_loss', q_function_loss)
-
 
         if self._use_model:
             _, _, self._best_actions = self._setup_action_selection(model_function, policy, target_value_function)
@@ -310,9 +308,9 @@ class SAC:
         self._start = time.time()
         for epoch in range(n_epochs):
             for t in range(self._epoch_length):
-                sampler.sample(policy=self.get_actions_using_model)
-    
+                sampler.sample(policy=self.get_actions_using_model if self._use_model else None)
                 batch = sampler.random_batch(self._batch_size)
+                
                 feed_dict = {
                     self._observations_ph: batch['observations'],
                     self._actions_ph: batch['actions'],
@@ -338,9 +336,10 @@ class SAC:
             'Time': time.time() - self._start,
             'TimestepsThisBatch': self._epoch_length,
         }
-        
-        for name, val in self._loss_show.items():
-            statistics[name] = val
-            
 
+        # For debug
+        if DEBUG:
+            for name, val in self._loss_show.items():
+                statistics[name] = val
+            
         return statistics

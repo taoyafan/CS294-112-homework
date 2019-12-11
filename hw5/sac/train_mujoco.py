@@ -29,14 +29,14 @@ def train_SAC(env_name, exp_name, seed, logdir, use_model=False):
         'batch_size': 256,
         'discount': 0.99,
         'learning_rate': 1e-3,
-        'reparameterize': False,
+        'reparameterize': True,
         'tau': 0.01,
         'epoch_length': 1000,
         'n_epochs': 500,
         'two_qf': True,
         'use_model': use_model,
-        'horizon': 15,
-        'num_action_selection': 4096
+        'horizon': 45,
+        'num_action_selection': 20
     }
     sampler_params = {
         'max_episode_length': 1000,
