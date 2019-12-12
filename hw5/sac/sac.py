@@ -77,7 +77,7 @@ class SAC:
         if self._use_model:
             obs_pre_loss, rewards_pre_loss = self._model_loss_for(model_function)
             
-        policy_loss = self._policy_loss_for(policy, q_function, q_function2, value_function, model_function)
+        policy_loss = self._policy_loss_for(policy, q_function, q_function2, target_value_function, model_function)
         
         optimizer = tf.train.AdamOptimizer(
             self._learning_rate, name='optimizer')
