@@ -3,8 +3,8 @@ import time
 import utils
 import numpy as np
 
-
-DEBUG = False
+LOSS_SHOW = False
+DEBUG = True
 
 
 class SAC:
@@ -35,8 +35,8 @@ class SAC:
         Args:
         """
         self._pool = pool
-
-        self._alpha = alpha
+        self._alpha_div_value = alpha
+        self._alpha = None
         self._batch_size = batch_size
         self._discount = discount
         self._epoch_length = epoch_length
@@ -66,6 +66,13 @@ class SAC:
               target_value_function, model_function):
         
         self._create_placeholders(env)
+        value = tf.stop_gradient(target_value_function(self._observations_ph))
+        value = tf.squeeze(value)
+        value = tf.reduce_mean(value)
+        self._alpha = tf.cond(value > 0, lambda: value * self._alpha_div_value, lambda: tf.zeros((1,), tf.float32))
+        self._alpha = self._alpha_div_value
+        self.add_debug('alpha', self._alpha)
+        self.add_debug('value_from_fun', value)
         
         value_function_loss = self._value_function_loss_for(
             policy, q_function, q_function2, value_function)
@@ -198,7 +205,6 @@ class SAC:
                 actions, temp_log_pis = policy(observations)
         
             rewards += tf.pow(self._discount, self._horizon) * tf.squeeze(value_function(observations))
-            # rewards = tf.squeeze(rewards)
         
             # list of tensor [num_action_selection]. length = batch size
             rewards_list = [tf.gather(rewards, tf.range(self._num_action_selection) * batch_size + i)
@@ -220,7 +226,7 @@ class SAC:
             best_action_list = [tf.gather(action_list[i], best_action_indices[i], axis=0)
                                 for i in range(batch_size)]
             
-            self.add_debug('best_action', tf.stack(best_action_list, axis=0))
+            # self.add_debug('best_action', tf.stack(best_action_list, axis=0))
 
             # shape = [batch size, 1], action shape is [batch size, action_dim]
             return tf.stack(best_action_log_pis, axis=0),\
@@ -243,9 +249,10 @@ class SAC:
             ### Problem 1.3.B
             ### YOUR CODE HERE
             action, log_pis = policy(self._observations_ph)
-            self.add_debug('log_pis', log_pis)
+            # self.add_debug('log_pis', log_pis)
             loss = self._alpha * log_pis - tf.squeeze(tf.minimum(q_function([self._observations_ph, action]),
                                                                  q_function2([self._observations_ph, action])))
+
         
         return tf.reduce_mean(loss)
 
@@ -256,9 +263,13 @@ class SAC:
             q_function2 = q_function
 
         action, log_pis = policy(self._observations_ph)
-        target_value = (tf.squeeze(tf.minimum(q_function([self._observations_ph, action]),
-                                              q_function2([self._observations_ph, action])))
-                        - self._alpha * log_pis)
+        target_value = tf.squeeze(tf.minimum(q_function([self._observations_ph, action]),
+                                             q_function2([self._observations_ph, action])))
+        
+        self.add_debug('value_from_q', tf.reduce_mean(target_value))
+        self.add_debug('log_pis', -tf.reduce_mean(log_pis))
+        
+        target_value = target_value - self._alpha * log_pis
         loss = (tf.squeeze(value_function(self._observations_ph)) - target_value) ** 2
         
         # self.add_debug('target_value', target_value)
@@ -307,6 +318,7 @@ class SAC:
         """
         self._start = time.time()
         for epoch in range(n_epochs):
+            debug_val_show = None
             for t in range(self._epoch_length):
                 sampler.sample(policy=self.get_actions_using_model if self._use_model else None)
                 batch = sampler.random_batch(self._batch_size)
@@ -318,17 +330,28 @@ class SAC:
                     self._rewards_ph: batch['rewards'],
                     self._terminals_ph: batch['terminals'],
                 }
-                self._debug_val_show, self._loss_show, _ = tf.get_default_session().run(
+                temp_debug_val_show, self._loss_show, _ = tf.get_default_session().run(
                     [self._debug_val, self._training_loss, self._training_ops], feed_dict)
                 tf.get_default_session().run(self._target_update_ops)
-            
+                
                 # For debug
                 if DEBUG:
-                    print('epoch: {}, t: {}\n'.format(epoch, t))
-                    for name, val in self._debug_val_show.items():
-                        print('{} is {}\n'.format(name, val))
-                    print('-'*50 + '\n')
-            
+                    # 累加 debug value
+                    if debug_val_show:
+                        for key in debug_val_show:
+                            debug_val_show[key] += temp_debug_val_show[key]
+                    else:
+                        debug_val_show = temp_debug_val_show
+                        
+                    # print('epoch: {}, t: {}\n'.format(epoch, t))
+                    # for name, val in temp_debug_val_show.items():
+                    #     print('{} is {}\n'.format(name, val))
+                    # for name, val in debug_val_show.items():
+                    #     print('sum {} is {}\n'.format(name, val))
+                    # print('-'*50 + '\n')
+
+            for key in debug_val_show:
+                self._debug_val_show[key] = debug_val_show[key] / self._epoch_length
             yield epoch
 
     def get_statistics(self):
@@ -338,8 +361,12 @@ class SAC:
         }
 
         # For debug
-        if DEBUG:
+        if LOSS_SHOW:
             for name, val in self._loss_show.items():
                 statistics[name] = val
-            
+        
+        if DEBUG:
+            for name, val in self._debug_val_show.items():
+                statistics[name] = val
+        
         return statistics

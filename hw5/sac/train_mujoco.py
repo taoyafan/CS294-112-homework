@@ -17,7 +17,7 @@ warnings.filterwarnings("ignore")
 
 def train_SAC(env_name, exp_name, seed, logdir, use_model=False):
     alpha = {
-        'Ant-v2': 0.1,
+        'Ant-v2': 1/600,   # 0.025/40,
         'HalfCheetah-v2': 0.2,
         'Hopper-v2': 0.2,
         'Humanoid-v2': 0.05,
@@ -35,7 +35,7 @@ def train_SAC(env_name, exp_name, seed, logdir, use_model=False):
         'n_epochs': 500,
         'two_qf': True,
         'use_model': use_model,
-        'horizon': 45,
+        'horizon': 15,
         'num_action_selection': 20
     }
     sampler_params = {
