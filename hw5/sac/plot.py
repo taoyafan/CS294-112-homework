@@ -48,13 +48,14 @@ the --legend flag and then provide a title for each logdir.
 
 """
 
-def plot_data(data, value="AverageReturn"):
+def plot_data(data, value="AverageReturn", name="AverageReturn"):
     if isinstance(data, list):
         data = pd.concat(data, ignore_index=True)
 
     sns.set(style="darkgrid", font_scale=1.5)
     sns.tsplot(data=data, time="Iteration", value=value, unit="Unit", condition="Condition")
-    plt.legend(loc='best').draggable()
+    plt.ylabel(name)
+    plt.legend(loc='best')#.draggable()
     plt.show()
 
 
@@ -81,7 +82,7 @@ def get_datasets(fpath, condition=None):
                 condition or exp_name
                 )
 
-            datasets.append(experiment_data)
+            datasets.append(experiment_data[0:500])
             unit += 1
 
     return datasets
@@ -93,7 +94,11 @@ def main():
     parser.add_argument('logdir', nargs='*')
     parser.add_argument('--legend', nargs='*')
     parser.add_argument('--value', default='LastEpReturn', nargs='*')
+    parser.add_argument('--name', default='LastEpReturn', nargs='*')
     args = parser.parse_args()
+
+    if args.name is None:
+        args.name = args.value
 
     use_legend = False
     if args.legend is not None:
@@ -114,7 +119,7 @@ def main():
     else:
         values = [args.value]
     for value in values:
-        plot_data(data, value=value)
+        plot_data(data, value=value, name=args.name[0])
 
 
 if __name__ == "__main__":
