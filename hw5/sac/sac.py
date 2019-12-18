@@ -69,8 +69,9 @@ class SAC:
         value = tf.stop_gradient(target_value_function(self._observations_ph))
         value = tf.squeeze(value)
         value = tf.reduce_mean(value)
-        self._alpha = tf.cond(value > 0, lambda: value * self._alpha_div_value, lambda: tf.zeros((1,), tf.float32))
-        self._alpha = self._alpha_div_value
+        self._alpha = value * self._alpha_div_value
+        self._alpha = tf.cond(self._alpha > 0.025, lambda: self._alpha,
+                              lambda: tf.constant(0.025, tf.float32))
         self.add_debug('alpha', self._alpha)
         self.add_debug('value_from_fun', value)
         

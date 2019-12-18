@@ -94,11 +94,8 @@ def main():
     parser.add_argument('logdir', nargs='*')
     parser.add_argument('--legend', nargs='*')
     parser.add_argument('--value', default='LastEpReturn', nargs='*')
-    parser.add_argument('--name', default='LastEpReturn', nargs='*')
+    parser.add_argument('--name', nargs='*')
     args = parser.parse_args()
-
-    if args.name is None:
-        args.name = args.value
 
     use_legend = False
     if args.legend is not None:
@@ -118,6 +115,16 @@ def main():
         values = args.value
     else:
         values = [args.value]
+
+    if args.name is None:
+        args.name = args.value
+
+    if args.name[0] == 'alpha':
+        for i, da in enumerate(data):
+            print(data[i].Condition[0])
+            if data[i].Condition[0] == 'k=1/600':
+                a = 0
+            data[i].alpha = da.alpha.apply(lambda x: float(x[1:-1]) if type(x) is str and '[' in x else float(x))
     for value in values:
         plot_data(data, value=value, name=args.name[0])
 
