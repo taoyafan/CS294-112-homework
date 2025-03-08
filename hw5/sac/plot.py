@@ -70,7 +70,8 @@ def get_datasets(fpath, condition=None):
             
             log_path = os.path.join(root, 'log.txt')
             experiment_data = pd.read_table(log_path)
-
+            if 'real' in log_path:
+                experiment_data['MaxEpReturn'] = experiment_data['MaxEpReturn']*5/5000 - 4
             experiment_data.insert(
                 len(experiment_data.columns),
                 'Unit',
@@ -121,9 +122,6 @@ def main():
 
     if args.name[0] == 'alpha':
         for i, da in enumerate(data):
-            print(data[i].Condition[0])
-            if data[i].Condition[0] == 'k=1/600':
-                a = 0
             data[i].alpha = da.alpha.apply(lambda x: float(x[1:-1]) if type(x) is str and '[' in x else float(x))
     for value in values:
         plot_data(data, value=value, name=args.name[0])

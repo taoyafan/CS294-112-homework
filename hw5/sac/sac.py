@@ -3,7 +3,7 @@ import time
 import utils
 import numpy as np
 
-LOSS_SHOW = False
+LOSS_SHOW = True
 DEBUG = True
 
 
@@ -101,9 +101,9 @@ class SAC:
             policy_training_op, value_training_op, q_function_training_op
         ]
         
-        self._add_loss('policy_loss', policy_loss)
-        self._add_loss('value_function_loss', value_function_loss)
-        self._add_loss('q_function_loss', q_function_loss)
+        # self._add_loss('policy_loss', policy_loss)
+        # self._add_loss('value_function_loss', value_function_loss)
+        # self._add_loss('q_function_loss', q_function_loss)
 
         if self._use_model:
             _, _, self._best_actions = self._setup_action_selection(model_function, policy, target_value_function)

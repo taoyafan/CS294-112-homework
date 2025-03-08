@@ -35,8 +35,8 @@ def train_SAC(env_name, exp_name, seed, logdir, use_model=False):
         'n_epochs': 500,
         'two_qf': True,
         'use_model': use_model,
-        'horizon': 15,
-        'num_action_selection': 20
+        'horizon': 45,
+        'num_action_selection': 45
     }
     sampler_params = {
         'max_episode_length': 1000,
